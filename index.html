@@ -45,7 +45,7 @@ const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
 // ── AI food search ─────────────────────────────────────────────
 async function searchFood(query) {
-  const GEMINI_KEY = 'AIzaSyASY3kA_SJWts_NjLbFkM9JsLXV0-LBjQ0'; // paste your key here
+  const GEMINI_KEY = '14632161146-l5nspikgknipfdmqj5aa2ssc7rn8s17q.apps.googleusercontent.com'; // paste your key here
   const prompt = `You are a nutrition database. For "${query}", return ONLY a JSON array (no markdown) of up to 4 foods with data per 100g. Include Indian foods if relevant. Format: [{"name":"Food","calories":150,"protein":5,"carbs":20,"fat":6}]. Only the JSON array, nothing else.`;
 
   const res = await fetch(
