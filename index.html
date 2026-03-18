@@ -49,7 +49,7 @@ async function searchFood(query) {
   const prompt = `You are a nutrition database. For "${query}", return ONLY a JSON array (no markdown) of up to 4 foods with data per 100g. Include Indian foods if relevant. Format: [{"name":"Food","calories":150,"protein":5,"carbs":20,"fat":6}]. Only the JSON array, nothing else.`;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
