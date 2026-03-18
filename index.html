@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FitTrack" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" />
+  <title>FitTrack</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0a0a0f; color: #f0f0ff; font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+    input, button { font-family: inherit; }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="module">
+// ── Imports via CDN (no build step needed) ─────────────────────
+import React, { useState, useEffect } from 'https://esm.sh/react@18';
+import { createRoot } from 'https://esm.sh/react-dom@18/client';
+const h = React.createElement;
+
+// ── Theme ──────────────────────────────────────────────────────
+const t = {
+  bg:'#0a0a0f', surface:'#12121a', card:'#1a1a26', border:'#2a2a3e',
+  accent:'#6c63ff', green:'#22d07a', orange:'#ff8c42', red:'#ff4d6d',
+  text:'#f0f0ff', muted:'#8888aa', dim:'#555570'
+};
+
+const GOALS = { calories:1950, protein:110, carbs:220, fat:60 };
+const TARGET = 78;
+
+// ── Storage ────────────────────────────────────────────────────
+const today = () => new Date().toISOString().split('T')[0];
+const load = (k, fb) => { try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; } };
+const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+// ── AI food search ─────────────────────────────────────────────
+async function searchFood(query) {
+  const prompt = `You are a nutrition database. For "${query}", return ONLY a JSON array (no markdown) of up to 4 foods with data per 100g. Include Indian foods if relevant. Format: [{"name":"Food","calories":150,"protein":5,"carbs":20,"fat":6}]. Only the JSON array.`;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:600, messages:[{role:'user',content:prompt}] })
+  });
+  const data = await res.json();
+  const text = data.content?.find(b => b.type==='text')?.text || '[]';
+  return JSON.parse(text.replace(/```json|```/g,'').trim());
+}
+
+// ── Shared styles ──────────────────────────────────────────────
+const card = (extra={}) => ({ background:t.card, border:`1px solid ${t.border}`, borderRadius:16, padding:16, ...extra });
+const inp = (extra={}) => ({ width:'100%', background:t.bg, border:`1px solid ${t.border}`, borderRadius:10, padding:'10px 14px', color:t.text, fontSize:14, outline:'none', fontFamily:'inherit', boxSizing:'border-box', ...extra });
+const btn = (bg, color='#fff', extra={}) => ({ background:bg, border:'none', borderRadius:12, padding:'11px 18px', color, fontWeight:700, cursor:'pointer', fontSize:14, ...extra });
+
+// ── MacroBar ───────────────────────────────────────────────────
+function MacroBar({ label, value, goal, color }) {
+  return h('div', { style:{...card(), textAlign:'center', padding:'12px 10px'} },
+    h('div', { style:{fontSize:20,fontWeight:800,color,fontFamily:"'DM Mono',monospace"} },
+      Math.round(value), h('span',{style:{fontSize:11,color:t.muted}},' g')),
+    h('div', { style:{fontSize:10,color:t.muted,textTransform:'uppercase',letterSpacing:.8,margin:'3px 0 6px'} }, label),
+    h('div', { style:{background:t.border,borderRadius:99,height:3} },
+      h('div', { style:{width:`${Math.min(value/goal*100,100)}%`,height:'100%',borderRadius:99,background:color,transition:'width .5s'} })),
+    h('div', { style:{fontSize:9,color:t.dim,marginTop:3} }, `/ ${goal}g`)
+  );
+}
+
+// ── DASHBOARD ──────────────────────────────────────────────────
+function Dashboard({ foodLogs, weightLog, workoutLog }) {
+  const foods = foodLogs[today()] || [];
+  const tot = foods.reduce((a,f) => ({calories:a.calories+f.calories,protein:a.protein+f.protein,carbs:a.carbs+f.carbs,fat:a.fat+f.fat}),{calories:0,protein:0,carbs:0,fat:0});
+  const latest = weightLog.length ? weightLog[weightLog.length-1].weight : 95;
+  const first  = weightLog.length ? weightLog[0].weight : 95;
+  const lost = first - latest;
+  const workouts = workoutLog[today()] || [];
+  const hr = new Date().getHours();
+  const greeting = hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
+  const remaining = GOALS.calories - Math.round(tot.calories);
+
+  return h('div', { style:{padding:'24px 20px 100px'} },
+    h('div', { style:{marginBottom:28} },
+      h('div', { style:{fontSize:12,color:t.muted,letterSpacing:1,textTransform:'uppercase',marginBottom:4} }, greeting),
+      h('div', { style:{fontSize:26,fontWeight:800,color:t.text,fontFamily:"'Syne',sans-serif",lineHeight:1.1} },
+        'Daily ', h('span',{style:{color:t.accent}},'Overview'))
+    ),
+
+    // Calorie card
+    h('div', { style:{background:`linear-gradient(135deg,${t.card},#1e1e30)`,border:`1px solid ${t.border}`,borderRadius:20,padding:20,marginBottom:14} },
+      h('div', { style:{display:'flex',justifyContent:'space-between',marginBottom:18} },
+        h('div', null,
+          h('div',{style:{fontSize:11,color:t.muted,letterSpacing:1,textTransform:'uppercase',marginBottom:4}},'Calories Today'),
+          h('div',{style:{fontSize:40,fontWeight:800,color:t.text,fontFamily:"'DM Mono',monospace",lineHeight:1}},Math.round(tot.calories)),
+          h('div',{style:{fontSize:12,color:t.muted,marginTop:3}},`of ${GOALS.calories} kcal goal`)
+        ),
+        h('div', { style:{textAlign:'right'} },
+          h('div',{style:{fontSize:30,fontWeight:800,color:remaining>=0?t.green:t.red,fontFamily:"'DM Mono',monospace"}},Math.abs(remaining)),
+          h('div',{style:{fontSize:11,color:t.muted}},remaining>=0?'remaining':'over goal')
+        )
+      ),
+      h('div',{style:{background:t.border,borderRadius:99,height:6,overflow:'hidden'}},
+        h('div',{style:{width:`${Math.min(tot.calories/GOALS.calories*100,100)}%`,height:'100%',borderRadius:99,background:tot.calories>GOALS.calories?t.red:t.accent,transition:'width .6s'}}))
+    ),
+
+    // Macros
+    h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:14}},
+      h(MacroBar,{label:'Protein',value:tot.protein,goal:GOALS.protein,color:t.accent}),
+      h(MacroBar,{label:'Carbs',value:tot.carbs,goal:GOALS.carbs,color:t.orange}),
+      h(MacroBar,{label:'Fat',value:tot.fat,goal:GOALS.fat,color:t.green})
+    ),
+
+    // Weight + goal
+    h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}},
+      h('div',{style:card()},
+        h('div',{style:{fontSize:10,color:t.muted,textTransform:'uppercase',letterSpacing:.8,marginBottom:4}},'Current Weight'),
+        h('div',{style:{fontSize:26,fontWeight:800,color:t.text,fontFamily:"'DM Mono',monospace"}},latest,h('span',{style:{fontSize:13,color:t.muted}},' kg')),
+        lost>0 && h('span',{style:{background:t.green+'22',color:t.green,borderRadius:99,padding:'2px 10px',fontSize:11,fontWeight:600}},`▼ ${lost.toFixed(1)}kg lost`)
+      ),
+      h('div',{style:card()},
+        h('div',{style:{fontSize:10,color:t.muted,textTransform:'uppercase',letterSpacing:.8,marginBottom:4}},'To Goal (78kg)'),
+        h('div',{style:{fontSize:26,fontWeight:800,color:t.orange,fontFamily:"'DM Mono',monospace"}},Math.max(0,latest-TARGET).toFixed(1),h('span',{style:{fontSize:13,color:t.muted}},' kg')),
+        h('div',{style:{fontSize:11,color:t.muted}},`~${Math.ceil(Math.max(0,latest-TARGET)/0.6)} weeks`)
+      )
+    ),
+
+    // Today workouts
+    workouts.length>0 && h('div',{style:card()},
+      h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:10}},"Today's Workout"),
+      workouts.map((w,i) => h('div',{key:i,style:{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:i<workouts.length-1?`1px solid ${t.border}`:'none'}},
+        h('span',{style:{color:t.text,fontWeight:600}},w.exercise),
+        h('span',{style:{color:t.muted,fontSize:13,fontFamily:"'DM Mono',monospace"}},`${w.sets}×${w.reps}${w.weight?` @ ${w.weight}kg`:''}`)
+      ))
+    )
+  );
+}
+
+// ── FOOD ───────────────────────────────────────────────────────
+function FoodTab({ foodLogs, setFoodLogs }) {
+  const [query,setQuery] = useState('');
+  const [results,setResults] = useState([]);
+  const [loading,setLoading] = useState(false);
+  const [qty,setQty] = useState({});
+  const [err,setErr] = useState('');
+  const key = today();
+  const foods = foodLogs[key] || [];
+
+  async function doSearch() {
+    if (!query.trim()) return;
+    setLoading(true); setErr(''); setResults([]);
+    try {
+      const r = await searchFood(query);
+      setResults(r);
+      const q={}; r.forEach((_,i)=>q[i]=100); setQty(q);
+    } catch { setErr('Search failed. Check your internet and try again.'); }
+    setLoading(false);
+  }
+
+  function add(food,i) {
+    const m=(qty[i]||100)/100;
+    const entry={name:food.name,grams:qty[i]||100,calories:Math.round(food.calories*m),protein:Math.round(food.protein*m*10)/10,carbs:Math.round(food.carbs*m*10)/10,fat:Math.round(food.fat*m*10)/10,time:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})};
+    const updated={...foodLogs,[key]:[...foods,entry]};
+    setFoodLogs(updated); save('foodLogs',updated);
+    setResults([]); setQuery('');
+  }
+
+  function remove(i) {
+    const updated={...foodLogs,[key]:foods.filter((_,idx)=>idx!==i)};
+    setFoodLogs(updated); save('foodLogs',updated);
+  }
+
+  return h('div',{style:{padding:'24px 20px 100px'}},
+    h('div',{style:{fontSize:22,fontWeight:800,color:t.text,fontFamily:"'Syne',sans-serif",marginBottom:4}},'Food ',h('span',{style:{color:t.accent}},'Tracker')),
+    h('div',{style:{fontSize:13,color:t.muted,marginBottom:20}},'AI-powered · Indian meals included'),
+
+    h('div',{style:{display:'flex',gap:8,marginBottom:12}},
+      h('input',{value:query,onChange:e=>setQuery(e.target.value),onKeyDown:e=>e.key==='Enter'&&doSearch(),placeholder:'dal makhani, paneer, roti...',style:{...inp(),flex:1}}),
+      h('button',{onClick:doSearch,disabled:loading,style:btn(t.accent,'#fff',{opacity:loading?.6:1,whiteSpace:'nowrap'})},loading?'...':'Search')
+    ),
+    err && h('div',{style:{color:t.red,fontSize:13,marginBottom:10}},err),
+
+    results.map((food,i) => h('div',{key:i,style:{...card(),marginBottom:10}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:10}},
+        h('div',null,h('div',{style:{fontWeight:700,color:t.text}},food.name),h('div',{style:{fontSize:11,color:t.muted}},'per 100g')),
+        h('div',{style:{textAlign:'right'}},h('div',{style:{fontWeight:800,color:t.accent,fontSize:20,fontFamily:"'DM Mono',monospace"}},Math.round(food.calories*(qty[i]||100)/100)),h('div',{style:{fontSize:11,color:t.muted}},'kcal'))
+      ),
+      h('div',{style:{display:'flex',gap:6,marginBottom:12}},
+        [['P',food.protein,t.accent],['C',food.carbs,t.orange],['F',food.fat,t.green]].map(([l,v,c])=>
+          h('div',{key:l,style:{background:c+'18',borderRadius:8,padding:'4px 10px',fontSize:12,color:c,fontWeight:600}},`${l}: ${Math.round(v*(qty[i]||100)/100)}g`)
+        )
+      ),
+      h('div',{style:{display:'flex',gap:8,alignItems:'center'}},
+        h('input',{type:'number',value:qty[i]||100,onChange:e=>setQty({...qty,[i]:Number(e.target.value)}),style:{...inp(),width:70,fontFamily:"'DM Mono',monospace"}}),
+        h('span',{style:{color:t.muted,fontSize:13}},'g'),
+        h('button',{onClick:()=>add(food,i),style:{...btn(t.green,'#000'),marginLeft:'auto',padding:'8px 16px',fontSize:13}},'+ Add')
+      )
+    )),
+
+    foods.length>0 && h('div',{style:{marginTop:24}},
+      h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:10}},"Today's Log"),
+      foods.map((f,i)=>h('div',{key:i,style:{...card({padding:'12px 14px'}),marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        h('div',null,h('div',{style:{fontWeight:600,color:t.text,fontSize:14}},f.name),h('div',{style:{fontSize:12,color:t.muted}},`${f.grams}g · ${f.time}`)),
+        h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+          h('div',{style:{textAlign:'right'}},h('div',{style:{fontWeight:700,color:t.accent,fontFamily:"'DM Mono',monospace"}},f.calories),h('div',{style:{fontSize:10,color:t.muted}},'kcal')),
+          h('button',{onClick:()=>remove(i),style:{background:t.red+'22',border:'none',borderRadius:7,color:t.red,cursor:'pointer',padding:'4px 9px',fontSize:15}},'×')
+        )
+      ))
+    )
+  );
+}
+
+// ── WORKOUT ────────────────────────────────────────────────────
+const EXERCISES = ['Push-ups','Bodyweight Squats','Plank','Lunges','Burpees','Pull-ups','Dips','Mountain Climbers','Jump Squats','Glute Bridges','Bench Press','Deadlift','Barbell Squat','Overhead Press','Bent-over Row','Lat Pulldown','Cable Row','Leg Press','Bicep Curl','Tricep Pushdown','Walking','Running','Cycling'];
+
+function WorkoutTab({ workoutLog, setWorkoutLog }) {
+  const [exercise,setExercise]=useState('');
+  const [sets,setSets]=useState('3');
+  const [reps,setReps]=useState('10');
+  const [weight,setWeight]=useState('');
+  const [showSug,setShowSug]=useState(false);
+  const key=today();
+  const workouts=workoutLog[key]||[];
+  const filtered=exercise?EXERCISES.filter(e=>e.toLowerCase().includes(exercise.toLowerCase())):[];
+
+  function addEx(){
+    if(!exercise||!sets||!reps)return;
+    const updated={...workoutLog,[key]:[...workouts,{exercise,sets:+sets,reps:+reps,weight:weight?+weight:null}]};
+    setWorkoutLog(updated); save('workoutLog',updated);
+    setExercise(''); setSets('3'); setReps('10'); setWeight('');
+  }
+  function removeEx(i){
+    const updated={...workoutLog,[key]:workouts.filter((_,idx)=>idx!==i)};
+    setWorkoutLog(updated); save('workoutLog',updated);
+  }
+
+  return h('div',{style:{padding:'24px 20px 100px'}},
+    h('div',{style:{fontSize:22,fontWeight:800,color:t.text,fontFamily:"'Syne',sans-serif",marginBottom:4}},'Workout ',h('span',{style:{color:t.green}},'Logger')),
+    h('div',{style:{fontSize:13,color:t.muted,marginBottom:20}},'Log exercises, sets & reps'),
+
+    h('div',{style:{...card(),borderRadius:18,marginBottom:20}},
+      h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:12}},'Add Exercise'),
+      h('div',{style:{position:'relative',marginBottom:10}},
+        h('input',{value:exercise,onChange:e=>{setExercise(e.target.value);setShowSug(true);},onFocus:()=>setShowSug(true),onBlur:()=>setTimeout(()=>setShowSug(false),150),placeholder:'e.g. Push-ups, Deadlift...',style:inp()}),
+        showSug&&filtered.length>0&&h('div',{style:{position:'absolute',top:'100%',left:0,right:0,background:t.surface,border:`1px solid ${t.border}`,borderRadius:10,zIndex:50,overflow:'hidden',marginTop:4}},
+          filtered.slice(0,5).map(s=>h('div',{key:s,onMouseDown:()=>{setExercise(s);setShowSug(false);},style:{padding:'10px 14px',cursor:'pointer',color:t.text,fontSize:14,borderBottom:`1px solid ${t.border}`}},s))
+        )
+      ),
+      h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}},
+        [['Sets',sets,setSets],['Reps',reps,setReps],['kg (opt)',weight,setWeight]].map(([l,v,fn])=>
+          h('div',{key:l},h('div',{style:{fontSize:11,color:t.muted,marginBottom:4}},l),h('input',{type:'number',value:v,onChange:e=>fn(e.target.value),style:{...inp(),fontFamily:"'DM Mono',monospace"}}))
+        )
+      ),
+      h('button',{onClick:addEx,style:{...btn(t.green,'#000'),width:'100%',borderRadius:12,padding:12}},'+ Log Exercise')
+    ),
+
+    workouts.length===0
+      ? h('div',{style:{textAlign:'center',color:t.dim,padding:'40px 0',fontSize:14}},"No exercises logged today. Let's go! 💪")
+      : h('div',null,
+          h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:10}},`Today · ${workouts.length} exercises`),
+          workouts.map((w,i)=>h('div',{key:i,style:{...card({padding:'13px 15px'}),marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            h('div',null,h('div',{style:{fontWeight:700,color:t.text}},w.exercise),h('div',{style:{fontSize:13,color:t.muted,fontFamily:"'DM Mono',monospace",marginTop:2}},`${w.sets} × ${w.reps}${w.weight?` @ ${w.weight}kg`:''}`)),
+            h('button',{onClick:()=>removeEx(i),style:{background:t.red+'22',border:'none',borderRadius:8,color:t.red,cursor:'pointer',padding:'4px 10px',fontSize:15}},'×')
+          ))
+        )
+  );
+}
+
+// ── PROGRESS ───────────────────────────────────────────────────
+function ProgressTab({ weightLog, setWeightLog }) {
+  const [input,setInput]=useState('');
+
+  function logWeight(){
+    if(!input)return;
+    const updated=[...weightLog.filter(w=>w.date!==today()),{date:today(),weight:+input}].sort((a,b)=>a.date.localeCompare(b.date));
+    setWeightLog(updated); save('weightLog',updated); setInput('');
+  }
+
+  const current=weightLog.length?weightLog[weightLog.length-1].weight:null;
+  const first=weightLog.length?weightLog[0].weight:null;
+  const lost=first&&current?first-current:0;
+  const toGoal=current?Math.max(0,current-TARGET):null;
+  const pct=first&&lost>0?Math.min((lost/(first-TARGET))*100,100):0;
+
+  const chartData=weightLog.slice(-14);
+  const minW=chartData.length?Math.min(...chartData.map(d=>d.weight))-1:70;
+  const maxW=chartData.length?Math.max(...chartData.map(d=>d.weight))+1:100;
+  const W=320,H=100;
+  const toY=w=>H-((w-minW)/(maxW-minW))*H;
+  const toX=i=>chartData.length===1?W/2:(i/(chartData.length-1))*W;
+  const pts=chartData.map((d,i)=>`${toX(i)},${toY(d.weight)}`).join(' ');
+
+  return h('div',{style:{padding:'24px 20px 100px'}},
+    h('div',{style:{fontSize:22,fontWeight:800,color:t.text,fontFamily:"'Syne',sans-serif",marginBottom:4}},'Your ',h('span',{style:{color:t.orange}},'Progress')),
+    h('div',{style:{fontSize:13,color:t.muted,marginBottom:20}},'Log weight daily for best results'),
+
+    h('div',{style:{...card(),marginBottom:14}},
+      h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:10}},"Log Today's Weight"),
+      h('div',{style:{display:'flex',gap:8,alignItems:'center'}},
+        h('input',{type:'number',step:'0.1',value:input,onChange:e=>setInput(e.target.value),onKeyDown:e=>e.key==='Enter'&&logWeight(),placeholder:'e.g. 94.2',style:{...inp(),flex:1,fontFamily:"'DM Mono',monospace",fontSize:16}}),
+        h('span',{style:{color:t.muted}},'kg'),
+        h('button',{onClick:logWeight,style:btn(t.orange,'#000')},'Log')
+      )
+    ),
+
+    current && h('div',null,
+      h('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}},
+        [['Start',`${first}kg`,t.muted],['Current',`${current}kg`,t.text],['Lost',`${lost.toFixed(1)}kg`,lost>0?t.green:t.muted],['To 78kg',`${toGoal?.toFixed(1)}kg`,t.orange]].map(([l,v,c])=>
+          h('div',{key:l,style:card()},h('div',{style:{fontSize:10,color:t.muted,textTransform:'uppercase',letterSpacing:.8,marginBottom:4}},l),h('div',{style:{fontSize:22,fontWeight:800,color:c,fontFamily:"'DM Mono',monospace"}},v))
+        )
+      ),
+      h('div',{style:{...card(),marginBottom:14}},
+        h('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:8}},
+          h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1}},'Journey to 78kg'),
+          h('div',{style:{fontSize:13,fontWeight:700,color:t.orange,fontFamily:"'DM Mono',monospace"}},`${pct.toFixed(0)}%`)
+        ),
+        h('div',{style:{background:t.border,borderRadius:99,height:8,overflow:'hidden'}},
+          h('div',{style:{width:`${pct}%`,height:'100%',borderRadius:99,background:`linear-gradient(90deg,${t.accent},${t.orange})`,transition:'width .8s'}})),
+        h('div',{style:{display:'flex',justifyContent:'space-between',marginTop:5}},h('div',{style:{fontSize:10,color:t.dim}},`${first}kg`),h('div',{style:{fontSize:10,color:t.dim}},'78kg'))
+      )
+    ),
+
+    chartData.length>1 && h('div',{style:{...card(),marginBottom:14}},
+      h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:12}},'Weight Chart'),
+      h('svg',{width:'100%',viewBox:`0 0 ${W} ${H+10}`,style:{overflow:'visible'}},
+        h('defs',null,h('linearGradient',{id:'og',x1:'0',y1:'0',x2:'0',y2:'1'},h('stop',{offset:'0%',stopColor:t.orange}),h('stop',{offset:'100%',stopColor:t.orange,stopOpacity:0}))),
+        [0,.5,1].map(f=>h('line',{key:f,x1:0,y1:H*f,x2:W,y2:H*f,stroke:t.border,strokeWidth:1,strokeDasharray:'4,4'})),
+        h('polygon',{points:`0,${H} ${pts} ${W},${H}`,fill:'url(#og)',opacity:.25}),
+        h('polyline',{points:pts,fill:'none',stroke:t.orange,strokeWidth:2.5,strokeLinecap:'round',strokeLinejoin:'round'}),
+        chartData.map((d,i)=>h('circle',{key:i,cx:toX(i),cy:toY(d.weight),r:4,fill:t.orange,stroke:t.card,strokeWidth:2}))
+      )
+    ),
+
+    weightLog.length>0 && h('div',null,
+      h('div',{style:{fontSize:11,color:t.muted,textTransform:'uppercase',letterSpacing:1,marginBottom:10}},'History'),
+      [...weightLog].reverse().slice(0,15).map((w,i)=>
+        h('div',{key:i,style:{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:`1px solid ${t.border}`}},
+          h('span',{style:{color:t.muted,fontSize:13}},w.date),
+          h('span',{style:{color:t.text,fontWeight:700,fontFamily:"'DM Mono',monospace"}},`${w.weight} kg`)
+        )
+      )
+    )
+  );
+}
+
+// ── NAV ────────────────────────────────────────────────────────
+function Nav({ tab, setTab }) {
+  const tabs=[{id:'dashboard',icon:'◎',label:'Today'},{id:'food',icon:'◈',label:'Food'},{id:'workout',icon:'◆',label:'Workout'},{id:'progress',icon:'◉',label:'Progress'}];
+  return h('nav',{style:{position:'fixed',bottom:0,left:0,right:0,background:t.surface,borderTop:`1px solid ${t.border}`,display:'flex',justifyContent:'space-around',padding:'10px 0 max(18px, env(safe-area-inset-bottom))',zIndex:100}},
+    tabs.map(tab_=>h('button',{key:tab_.id,onClick:()=>setTab(tab_.id),style:{background:'none',border:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3,color:tab===tab_.id?t.accent:t.dim,transition:'color .2s',padding:'0 16px'}},
+      h('span',{style:{fontSize:18,lineHeight:1}},tab_.icon),
+      h('span',{style:{fontSize:10,fontWeight:600,letterSpacing:.8,textTransform:'uppercase'}},tab_.label)
+    ))
+  );
+}
+
+// ── APP ────────────────────────────────────────────────────────
+function App() {
+  const [tab,setTab]=useState('dashboard');
+  const [foodLogs,setFoodLogs]=useState(()=>load('foodLogs',{}));
+  const [weightLog,setWeightLog]=useState(()=>load('weightLog',[{date:today(),weight:95}]));
+  const [workoutLog,setWorkoutLog]=useState(()=>load('workoutLog',{}));
+
+  return h('div',{style:{background:t.bg,minHeight:'100vh',maxWidth:480,margin:'0 auto'}},
+    tab==='dashboard'&&h(Dashboard,{foodLogs,weightLog,workoutLog}),
+    tab==='food'&&h(FoodTab,{foodLogs,setFoodLogs}),
+    tab==='workout'&&h(WorkoutTab,{workoutLog,setWorkoutLog}),
+    tab==='progress'&&h(ProgressTab,{weightLog,setWeightLog}),
+    h(Nav,{tab,setTab})
+  );
+}
+
+// ── Mount ──────────────────────────────────────────────────────
+createRoot(document.getElementById('root')).render(h(App,null));
+
+// ── Service Worker ─────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
