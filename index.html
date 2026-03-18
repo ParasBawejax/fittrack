@@ -35,7 +35,7 @@ const t = {
   accent:'#6c63ff', green:'#22d07a', orange:'#ff8c42', red:'#ff4d6d',
   text:'#f0f0ff', muted:'#8888aa', dim:'#555570'
 };
-
+const ANTHROPIC_KEY = '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'
 const GOALS = { calories:1950, protein:110, carbs:220, fat:60 };
 const TARGET = 78;
 
@@ -50,6 +50,12 @@ async function searchFood(query) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:600, messages:[{role:'user',content:prompt}] })
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true
+    }
   });
   const data = await res.json();
   const text = data.content?.find(b => b.type==='text')?.text || '[]';
